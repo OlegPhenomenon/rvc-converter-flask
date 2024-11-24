@@ -4,11 +4,14 @@ from scipy.io import wavfile
 from rvc.modules.vc.modules import VC
 import os
 import tempfile
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 
 vc = VC()
-vc.get_vc("/root/rvc-converter-flask/rvc_models/kowalski.pth")
+vc.get_vc(os.getenv("pretrained"))
 
 @app.route("/convert", methods=["POST"])
 def convert_audio():
