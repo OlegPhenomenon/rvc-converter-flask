@@ -8,7 +8,7 @@ import tempfile
 app = Flask(__name__)
 
 vc = VC()
-vc.get_vc("/root/rvc_converter_flask/rvc_models/kowalski.pth")
+vc.get_vc("/root/rvc-converter-flask/rvc_models/kowalski.pth")
 
 @app.route("/convert", methods=["POST"])
 def convert_audio():
