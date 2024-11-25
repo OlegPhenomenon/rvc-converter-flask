@@ -42,10 +42,8 @@ def convert_audio():
         target.save(target_path)
 
     try:
-        # Используем target_path в вызове vc_single
-        # Предполагается, что vc_single может принимать путь к целевому аудио
         tgt_sr, audio_opt, _, _ = vc.vc_single(
-            speaker_id=None,  # Или используйте соответствующий идентификатор
+            speaker_id=None,
             input_audio_path=Path(input_path),
             target_audio_path=Path(target_path)
         )
