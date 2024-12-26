@@ -1,5 +1,7 @@
 flask
 scipy
-rvc
+rvc-python==0.1.5
+torch==2.1.1+cu118
+torchaudio==2.1.1+cu118
 pydub
 
