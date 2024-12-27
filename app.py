@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 # Initialize RVC with CUDA if available
 # device = "cuda:0" if os.getenv("USE_CUDA", "false").lower() == "true" else "cpu"
-devuce = "cuda:0"
+device = "cuda:0"
 rvc = RVCInference(device=device)
 
 # Define available models for different genders
