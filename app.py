@@ -63,6 +63,12 @@ def convert_audio():
     print(f"Loading model from: {model_path}")  # Debug log
     rvc.load_model(model_path)
 
+    # Set RVC parameters
+    rvc.f0up_key = pitch_adjust
+    rvc.f0method = "rmvpe"
+    rvc.index_rate = float(speaker_index.split('_')[1])
+    rvc.protect = 0.33
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_in:
         input_path = temp_in.name
         file.save(input_path)
@@ -76,16 +82,9 @@ def convert_audio():
     try:
         output_path = input_path + "_converted.wav"
         
-        # Perform the conversion with parameters
-        print(f"Converting with parameters: f0up_key={pitch_adjust}, index_rate={float(speaker_index.split('_')[1])}")
-        rvc.infer_file(
-            input_path, 
-            output_path,
-            f0up_key=pitch_adjust,
-            index_rate=float(speaker_index.split('_')[1]),
-            protect=0.33,
-            f0method="rmvpe"
-        )
+        # Perform the conversion
+        print(f"Converting with parameters: f0up_key={rvc.f0up_key}, index_rate={rvc.index_rate}")
+        rvc.infer_file(input_path, output_path)
 
         # Check output file
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
