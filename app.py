@@ -70,25 +70,22 @@ def convert_audio():
         # Debug: Check input file size
         input_size = os.path.getsize(input_path)
         print(f"Input file size: {input_size} bytes")
-        if input_size < 1000:  # Проверка на минимальный размер файла
+        if input_size < 1000:
             return jsonify({"error": "Input file too small or empty"}), 400
 
     try:
         output_path = input_path + "_converted.wav"
         
-        # Configure conversion parameters
-        config = {
-            "f0up_key": pitch_adjust,
-            "index_rate": float(speaker_index.split('_')[1]),  # Extract number from SPEAKER_XX
-            "protect": 0.33,
-            "f0method": "rmvpe"
-        }
-        print(f"Using config: {config}")  # Debug log
-        rvc.configure(config)
-
-        # Perform the conversion
-        print(f"Converting file: {input_path} -> {output_path}")  # Debug log
-        rvc.infer_file(input_path, output_path)
+        # Perform the conversion with parameters
+        print(f"Converting with parameters: f0up_key={pitch_adjust}, index_rate={float(speaker_index.split('_')[1])}")
+        rvc.infer_file(
+            input_path, 
+            output_path,
+            f0up_key=pitch_adjust,
+            index_rate=float(speaker_index.split('_')[1]),
+            protect=0.33,
+            f0method="rmvpe"
+        )
 
         # Check output file
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
