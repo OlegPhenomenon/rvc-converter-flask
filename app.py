@@ -23,14 +23,14 @@ rvc = RVCInference(device=device)
 # Define available models for different genders
 AVAILABLE_MODELS = {
     "male": {
-        "SPEAKER_01": "models/male_voice_1.pth",
-        "SPEAKER_02": "models/male_voice_2.pth",
-        "SPEAKER_03": "models/male_voice_3.pth"
+        "SPEAKER_01": "rvc_models/male_1/model.pth",
+        "SPEAKER_02": "rvc_models/male_2/model.pth",
+        "SPEAKER_03": "rvc_models/male_3/model.pth"
     },
     "female": {
-        "SPEAKER_01": "models/female_voice_1.pth",
-        "SPEAKER_02": "models/female_voice_2.pth",
-        "SPEAKER_03": "models/female_voice_3.pth"
+        "SPEAKER_01": "rvc_models/female_1/model.pth",
+        "SPEAKER_02": "rvc_models/female_2/model.pth",
+        # "SPEAKER_03": "rvc_models/female_3/model.pth"
     }
 }
 
@@ -51,6 +51,9 @@ def convert_audio():
     speaker_index = request.form.get("speaker_index", "SPEAKER_01")  # Default SPEAKER_01
     gender = request.form.get("gender", "male").lower()  # Default male
 
+    # Set pitch based on gender
+    pitch_adjust = 3 if gender == "male" else -12
+
     # Select appropriate model based on gender and speaker index
     if gender not in AVAILABLE_MODELS or speaker_index not in AVAILABLE_MODELS[gender]:
         return jsonify({"error": "Invalid gender or speaker index"}), 400
@@ -67,7 +70,7 @@ def convert_audio():
         
         # Configure conversion parameters
         rvc.configure({
-            "f0up_key": 0,  # No pitch adjustment needed
+            "f0up_key": pitch_adjust,  # Pitch adjustment based on gender
             "index_rate": float(speaker_index),
             "protect": 0.33,
             "f0method": "rmvpe"
