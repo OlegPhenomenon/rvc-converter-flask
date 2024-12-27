@@ -19,7 +19,7 @@ app = Flask(__name__)
 
 # Initialize RVC with CUDA if available
 # device = "cuda:0" if os.getenv("USE_CUDA", "false").lower() == "true" else "cpu"
-device = "cuda:0"
+devuce = "cuda:0"
 rvc = RVCInference(device=device)
 
 # Define available models for different genders
@@ -54,7 +54,7 @@ def convert_audio():
     gender = request.form.get("gender", "male").lower()
 
     # Set pitch based on gender
-    pitch_adjust = 3 if gender == "male" else -10
+    pitch_adjust = -3 if gender == "male" else 12
 
     # Select appropriate model based on gender and speaker index
     if gender not in AVAILABLE_MODELS or speaker_index not in AVAILABLE_MODELS[gender]:
