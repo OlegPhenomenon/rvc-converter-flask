@@ -54,8 +54,8 @@ def convert_audio():
     gender = request.form.get("gender", "male").lower()
 
     # Set pitch based on gender
-    # pitch_adjust = -3 if gender == "male" else 0
-    pitch_adjust = 0
+    pitch_adjust = -3 if gender == "male" else 2
+
     # Select appropriate model based on gender and speaker index
     if gender not in AVAILABLE_MODELS or speaker_index not in AVAILABLE_MODELS[gender]:
         return jsonify({"error": "Invalid gender or speaker index"}), 400
