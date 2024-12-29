@@ -25,8 +25,8 @@ rvc = RVCInference(device=device)
 # Define available models for different genders
 AVAILABLE_MODELS = {
     "male": {
-        "SPEAKER_01": "rvc_models/male_2/model.pth",
-        "SPEAKER_02": "rvc_models/male_1/model.pth",
+        "SPEAKER_01": "rvc_models/male_1/model.pth",
+        "SPEAKER_02": "rvc_models/male_2/model.pth",
         "SPEAKER_03": "rvc_models/male_3/model.pth"
     },
     "female": {
@@ -54,7 +54,7 @@ def convert_audio():
     gender = request.form.get("gender", "male").lower()
 
     # Set pitch based on gender
-    pitch_adjust = -4 if gender == "male" else 4
+    pitch_adjust = -3 if gender == "male" else 3
 
     # Select appropriate model based on gender and speaker index
     if gender not in AVAILABLE_MODELS or speaker_index not in AVAILABLE_MODELS[gender]:
