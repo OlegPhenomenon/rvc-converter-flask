@@ -119,6 +119,7 @@ def process_file(input_path, output_path, gender, speaker_index):
 
 @app.route("/convert_batch", methods=["POST"])
 def convert_audio_batch():
+    torch.cuda.empty_cache()
     """Конвертация пакета аудиофайлов с использованием RVC."""
     start_time = time.time()
     
@@ -170,7 +171,7 @@ def convert_audio_batch():
             # Параллельная обработка файлов с использованием ThreadPoolExecutor
             # Устанавливаем max_workers на optimal, чтобы управлять потоками эффективно
             # Для GPU-операций может быть эффективнее меньшее количество потоков
-            max_workers = min(4, len(input_files))  # ограничиваем максимальное число потоков
+            max_workers = min(6, len(input_files))  # ограничиваем максимальное число потоков
             
             success_count = 0
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
