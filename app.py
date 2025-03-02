@@ -3,26 +3,28 @@ from pathlib import Path
 import os
 import tempfile
 from dotenv import load_dotenv
+import torch  # Для проверки CUDA
 from rvc_python.infer import RVCInference
+import logging
 
-# curl -X POST \
-#   -F "file=@konstantin.wav" \
-#   -F "speaker_index=SPEAKER_01" \
-#   -F "gender=female" \
-#   http://localhost:5000/convert \
-#   --output converted.wav
-#   -v
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+# Загрузка переменных окружения из .env
 load_dotenv()
 
+# Инициализация Flask-приложения
 app = Flask(__name__)
 
-# Initialize RVC with CUDA if available
-# device = "cuda:0" if os.getenv("USE_CUDA", "false").lower() == "true" else "cpu"
-device = "cuda:0"
+# Проверка доступности CUDA и выбор устройства
+device = "cuda:0" if os.getenv("USE_CUDA", "false").lower() == "true" and torch.cuda.is_available() else "cpu"
+logger.info(f"Выбрано устройство: {device}")
+
+# Инициализация RVC с выбранным устройством
 rvc = RVCInference(device=device)
 
-# Define available models for different genders
+# Определение доступных моделей для разных полов
 AVAILABLE_MODELS = {
     "male": {
         "SPEAKER_02": "rvc_models/male_1/model.pth",
@@ -32,80 +34,93 @@ AVAILABLE_MODELS = {
     "female": {
         "SPEAKER_01": "rvc_models/female_1/model.pth",
         "SPEAKER_02": "rvc_models/female_2/model.pth",
-        # "SPEAKER_03": "rvc_models/female_3/model.pth"
+        # "SPEAKER_03": "rvc_models/female_3/model.pth"  # Закомментировано, если модель отсутствует
     }
 }
 
-# Load default model on startup
-DEFAULT_MODEL = AVAILABLE_MODELS["male"]["SPEAKER_01"]
-rvc.load_model(DEFAULT_MODEL)
+# Предзагрузка всех моделей при старте приложения
+loaded_models = {}
+for gender, speakers in AVAILABLE_MODELS.items():
+    for speaker, model_path in speakers.items():
+        if os.path.exists(model_path):
+            try:
+                rvc.load_model(model_path)
+                loaded_models[(gender, speaker)] = model_path
+                logger.info(f"Загружена модель для {gender} {speaker} из {model_path}")
+            except Exception as e:
+                logger.error(f"Ошибка загрузки модели для {gender} {speaker}: {str(e)}")
+        else:
+            logger.warning(f"Файл модели не найден: {model_path}")
 
 @app.route("/convert", methods=["POST"])
 def convert_audio():
+    """Конвертация аудиофайла с использованием RVC."""
+    # Проверка наличия файла в запросе
     if "file" not in request.files:
-        return jsonify({"error": "No file provided"}), 400
+        return jsonify({"error": "Файл не предоставлен"}), 400
 
     file = request.files["file"]
     if file.filename == "":
-        return jsonify({"error": "No file selected"}), 400
+        return jsonify({"error": "Файл не выбран"}), 400
 
-    # Get speaker index and gender from request
+    # Получение параметров из формы
     speaker_index = request.form.get("speaker_index", "SPEAKER_01")
     gender = request.form.get("gender", "male").lower()
 
-    # Set pitch based on gender
+    # Проверка, загружена ли модель для указанного пола и спикера
+    if (gender, speaker_index) not in loaded_models:
+        return jsonify({"error": "Неверный пол или индекс спикера"}), 400
+
+    # Установка сдвига высоты тона в зависимости от пола
     pitch_adjust = 0 if gender == "male" else 2
 
-    # Select appropriate model based on gender and speaker index
-    if gender not in AVAILABLE_MODELS or speaker_index not in AVAILABLE_MODELS[gender]:
-        return jsonify({"error": "Invalid gender or speaker index"}), 400
-
-    model_path = AVAILABLE_MODELS[gender][speaker_index]
-    print(f"Loading model from: {model_path}")  # Debug log
-    rvc.load_model(model_path)
-
-    # Set RVC parameters
+    # Установка параметров RVC
     rvc.f0up_key = pitch_adjust
     rvc.f0method = "rmvpe"
-    rvc.index_rate = float(speaker_index.split('_')[1])
+    rvc.index_rate = float(speaker_index.split('_')[1])  # Предполагается формат "SPEAKER_01"
     rvc.protect = 0.33
 
+    # Сохранение входного файла во временный файл
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_in:
         input_path = temp_in.name
         file.save(input_path)
-        
-        # Debug: Check input file size
+
+        # Проверка размера входного файла
         input_size = os.path.getsize(input_path)
-        print(f"Input file size: {input_size} bytes")
+        logger.info(f"Размер входного файла: {input_size} байт")
         if input_size < 1000:
-            return jsonify({"error": "Input file too small or empty"}), 400
+            os.remove(input_path)
+            return jsonify({"error": "Входной файл слишком маленький или пустой"}), 400
 
     try:
         output_path = input_path + "_converted.wav"
-        
-        # Perform the conversion
-        print(f"Converting with parameters: f0up_key={rvc.f0up_key}, index_rate={rvc.index_rate}")
+
+        # Выполнение конвертации
+        logger.info(f"Конвертация с параметрами: f0up_key={rvc.f0up_key}, index_rate={rvc.index_rate}")
         rvc.infer_file(input_path, output_path)
 
-        # Check output file
+        # Проверка выходного файла
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
-            return jsonify({"error": "Conversion failed - output file is empty or too small"}), 500
+            logger.error("Конвертация не удалась - выходной файл пустой или слишком маленький")
+            return jsonify({"error": "Конвертация не удалась - выходной файл пустой или слишком маленький"}), 500
 
+        # Отправка сконвертированного файла
         return send_file(output_path, as_attachment=True, download_name="converted.wav", mimetype="audio/wav")
 
     except Exception as e:
-        print(f"Error during conversion: {str(e)}")  # Debug log
+        logger.error(f"Ошибка во время конвертации: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
     finally:
+        # Очистка временных файлов
         if os.path.exists(input_path):
             os.remove(input_path)
-        if os.path.exists(output_path):
+        if 'output_path' in locals() and os.path.exists(output_path):
             os.remove(output_path)
 
 @app.route("/models", methods=["GET"])
 def list_models():
-    """List all available models in the models directory"""
+    """Список всех доступных моделей в директории models."""
     models_dir = Path("models")
     models = [f.name for f in models_dir.glob("*.pth")]
     return jsonify({"models": models})
