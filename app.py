@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import torch  # Для проверки CUDA
 from rvc_python.infer import RVCInference
 import logging
+import zipfile
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +24,7 @@ logger.info(f"Выбрано устройство: {device}")
 
 # Инициализация RVC с выбранным устройством
 rvc = RVCInference(device=device)
+torch.backends.cudnn.benchmark = True
 
 # Определение доступных моделей для разных полов
 AVAILABLE_MODELS = {
@@ -51,6 +53,63 @@ for gender, speakers in AVAILABLE_MODELS.items():
                 logger.error(f"Ошибка загрузки модели для {gender} {speaker}: {str(e)}")
         else:
             logger.warning(f"Файл модели не найден: {model_path}")
+
+@app.route("/convert_batch", methods=["POST"])
+def convert_audio_batch():
+    """Конвертация пакета аудиофайлов с использованием RVC."""
+    # Проверка наличия файлов в запросе
+    if "files" not in request.files:
+        return jsonify({"error": "Файлы не предоставлены"}), 400
+    
+    files = request.files.getlist("files")
+    if not files or files[0].filename == "":
+        return jsonify({"error": "Файлы не выбраны"}), 400
+    
+    # Получение общих параметров для всех файлов
+    speaker_index = request.form.get("speaker_index", "SPEAKER_01")
+    gender = request.form.get("gender", "male").lower()
+    
+    # Проверка модели
+    if (gender, speaker_index) not in loaded_models:
+        return jsonify({"error": "Неверный пол или индекс спикера"}), 400
+    
+    # Установка параметров RVC
+    pitch_adjust = 0 if gender == "male" else 2
+    rvc.f0up_key = pitch_adjust
+    rvc.f0method = "rmvpe"
+    rvc.index_rate = float(speaker_index.split('_')[1])
+    rvc.protect = 0.33
+    
+    # Создаем временную директорию для результатов
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_files = []
+        output_files = []
+        
+        # Сохраняем все входные файлы
+        for i, file in enumerate(files):
+            input_path = os.path.join(temp_dir, f"input_{i}.wav")
+            output_path = os.path.join(temp_dir, f"output_{i}.wav")
+            file.save(input_path)
+            input_files.append(input_path)
+            output_files.append(output_path)
+        
+        try:
+            # Обработка файлов (можно распараллелить на уровне PyTorch, если модель это поддерживает)
+            for input_path, output_path in zip(input_files, output_files):
+                rvc.infer_file(input_path, output_path)
+            
+            # Упаковка результатов (например, в архив)
+            result_zip = os.path.join(temp_dir, "results.zip")
+            with zipfile.ZipFile(result_zip, 'w') as zipf:
+                for output_path in output_files:
+                    if os.path.exists(output_path):
+                        zipf.write(output_path, os.path.basename(output_path))
+            
+            return send_file(result_zip, as_attachment=True, download_name="converted_batch.zip")
+            
+        except Exception as e:
+            logger.error(f"Ошибка во время пакетной конвертации: {str(e)}")
+            return jsonify({"error": str(e)}), 500
 
 @app.route("/convert", methods=["POST"])
 def convert_audio():
