@@ -119,7 +119,6 @@ def process_file(input_path, output_path, gender, speaker_index):
 
 @app.route("/convert_batch", methods=["POST"])
 def convert_audio_batch():
-    torch.cuda.empty_cache()
     """Конвертация пакета аудиофайлов с использованием RVC."""
     start_time = time.time()
     
