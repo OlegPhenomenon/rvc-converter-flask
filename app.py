@@ -9,6 +9,7 @@ import logging
 import zipfile
 import concurrent.futures
 import time
+import gc  # Для принудительной сборки мусора
 
 # Настройка логирования
 logging.basicConfig(
@@ -35,7 +36,14 @@ if device.startswith("cuda"):
     torch.backends.cuda.matmul.allow_tf32 = True
     if hasattr(torch.backends.cudnn, 'allow_tf32'):
         torch.backends.cudnn.allow_tf32 = True
-    logger.info("Включены оптимизации CUDA TF32")
+    
+    # Настройка управления памятью CUDA для избежания фрагментации
+    os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+    
+    # Установка ограничения на кеш памяти
+    torch.cuda.set_per_process_memory_fraction(0.8)  # Использовать не более 80% GPU памяти
+    
+    logger.info("Включены оптимизации CUDA TF32 и управление памятью")
 
 # Определение доступных моделей для разных полов
 AVAILABLE_MODELS = {
@@ -85,6 +93,11 @@ def process_file(input_path, output_path, gender, speaker_index):
     try:
         start_time = time.time()
         
+        # Очистка кеша CUDA перед обработкой
+        if device.startswith("cuda"):
+            torch.cuda.empty_cache()
+            gc.collect()
+        
         # Получаем соответствующий экземпляр RVC
         rvc_instance = rvc_instances.get((gender, speaker_index), default_rvc)
         if (gender, speaker_index) not in rvc_instances:
@@ -102,8 +115,31 @@ def process_file(input_path, output_path, gender, speaker_index):
             logger.warning(f"Пропуск обработки файла {input_path}: файл не существует или слишком маленький")
             return False
             
-        # Выполняем конвертацию
-        rvc_instance.infer_file(input_path, output_path)
+        # Выполняем конвертацию с обработкой ошибок памяти
+        try:
+            rvc_instance.infer_file(input_path, output_path)
+        except torch.cuda.OutOfMemoryError as e:
+            logger.error(f"CUDA out of memory при обработке {input_path}: {str(e)}")
+            # Очищаем кеш и пробуем еще раз
+            if device.startswith("cuda"):
+                torch.cuda.empty_cache()
+                gc.collect()
+                time.sleep(1)  # Даем время на очистку памяти
+            
+            try:
+                logger.info(f"Повторная попытка обработки {input_path} после очистки памяти")
+                rvc_instance.infer_file(input_path, output_path)
+            except Exception as retry_e:
+                logger.error(f"Повторная попытка не удалась для {input_path}: {str(retry_e)}")
+                return False
+        except Exception as e:
+            logger.error(f"Общая ошибка при обработке {input_path}: {str(e)}")
+            return False
+        
+        # Очистка кеша CUDA после обработки
+        if device.startswith("cuda"):
+            torch.cuda.empty_cache()
+            gc.collect()
         
         # Проверяем результат
         if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
@@ -116,6 +152,11 @@ def process_file(input_path, output_path, gender, speaker_index):
     except Exception as e:
         logger.error(f"Исключение при обработке {input_path}: {str(e)}")
         return False
+    finally:
+        # Принудительная очистка памяти в конце
+        if device.startswith("cuda"):
+            torch.cuda.empty_cache()
+        gc.collect()
 
 @app.route("/convert_batch", methods=["POST"])
 def convert_audio_batch():
@@ -169,8 +210,11 @@ def convert_audio_batch():
         try:
             # Параллельная обработка файлов с использованием ThreadPoolExecutor
             # Устанавливаем max_workers на optimal, чтобы управлять потоками эффективно
-            # Для GPU-операций может быть эффективнее меньшее количество потоков
-            max_workers = min(4, len(input_files))  # ограничиваем максимальное число потоков
+            # Для GPU-операций используем меньше потоков для избежания CUDA OOM
+            if device.startswith("cuda"):
+                max_workers = min(2, len(input_files))  # только 2 потока для GPU
+            else:
+                max_workers = min(4, len(input_files))  # больше потоков для CPU
             
             success_count = 0
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -253,6 +297,11 @@ def convert_audio():
     try:
         output_path = input_path + "_converted.wav"
 
+        # Очистка кеша CUDA перед обработкой
+        if device.startswith("cuda"):
+            torch.cuda.empty_cache()
+            gc.collect()
+
         # Выполнение конвертации с использованием соответствующего экземпляра
         rvc_instance = rvc_instances.get((gender, speaker_index), default_rvc)
         
@@ -300,11 +349,19 @@ def get_status():
     """Возвращает информацию о состоянии сервера."""
     cuda_info = {}
     if torch.cuda.is_available():
+        total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        allocated = torch.cuda.memory_allocated(0) / 1024**3
+        reserved = torch.cuda.memory_reserved(0) / 1024**3
+        free_memory = total_memory - allocated
+        
         cuda_info = {
             "device_name": torch.cuda.get_device_name(0),
             "device_count": torch.cuda.device_count(),
-            "memory_allocated": f"{torch.cuda.memory_allocated(0)/1024**3:.2f} GB",
-            "memory_reserved": f"{torch.cuda.memory_reserved(0)/1024**3:.2f} GB",
+            "total_memory": f"{total_memory:.2f} GB",
+            "memory_allocated": f"{allocated:.2f} GB",
+            "memory_reserved": f"{reserved:.2f} GB",
+            "memory_free": f"{free_memory:.2f} GB",
+            "memory_usage_percent": f"{(allocated/total_memory)*100:.1f}%",
             "max_memory_allocated": f"{torch.cuda.max_memory_allocated(0)/1024**3:.2f} GB",
         }
     
