@@ -45,50 +45,78 @@ if device.startswith("cuda"):
     
     logger.info("Включены оптимизации CUDA TF32 и управление памятью")
 
-# Определение доступных моделей для разных полов
-AVAILABLE_MODELS = {
+# Определение доступных моделей для разных языков и полов
+RU_AVAILABLE_MODELS = {
     "male": {
-        "SPEAKER_02": "rvc_models/male_1/model.pth",
         "SPEAKER_01": "rvc_models/male_2/model.pth",
+        "SPEAKER_02": "rvc_models/male_1/model.pth",
         "SPEAKER_03": "rvc_models/male_3/model.pth"
     },
     "female": {
         "SPEAKER_01": "rvc_models/female_1/model.pth",
         "SPEAKER_02": "rvc_models/female_2/model.pth",
-        # "SPEAKER_03": "rvc_models/female_3/model.pth"  # Закомментировано, если модель отсутствует
     }
+}
+
+ES_AVAILABLE_MODELS = {
+    "male": {
+        "SPEAKER_01": "rvc_models/es_male_1/model.pth",
+        "SPEAKER_02": "rvc_models/es_male_2/model.pth",
+    },
+    "female": {
+        "SPEAKER_01": "rvc_models/es_female_1/model.pth",
+    }
+}
+
+HI_AVAILABLE_MODELS = {
+    "male": {
+        "SPEAKER_01": "rvc_models/hi_male_1/model.pth",
+        "SPEAKER_02": "rvc_models/hi_male_2/model.pth",
+        "SPEAKER_03": "rvc_models/hi_male_3/model.pth",
+    },
+    "female": {
+        "SPEAKER_01": "rvc_models/hi_female_1/model.pth",
+    }
+}
+
+# Словарь для выбора моделей по языку
+LANGUAGE_MODELS = {
+    "ru": RU_AVAILABLE_MODELS,
+    "es": ES_AVAILABLE_MODELS,
+    "hi": HI_AVAILABLE_MODELS
 }
 
 # Создаем отдельные экземпляры RVC для каждой модели
 rvc_instances = {}
 
-# Предзагружаем модели в отдельные экземпляры RVC
-for gender, speakers in AVAILABLE_MODELS.items():
-    for speaker, model_path in speakers.items():
-        if os.path.exists(model_path):
-            try:
-                # Создаем новый экземпляр для каждой модели
-                rvc_instance = RVCInference(device=device)
-                rvc_instance.load_model(model_path)
-                
-                # Установка оптимальных параметров для данной модели
-                pitch_adjust = 0 if gender == "male" else 2
-                rvc_instance.f0up_key = pitch_adjust
-                rvc_instance.f0method = "rmvpe"  # или другой быстрый метод
-                rvc_instance.index_rate = float(speaker.split('_')[1])
-                rvc_instance.protect = 0.33
-                
-                rvc_instances[(gender, speaker)] = rvc_instance
-                logger.info(f"Загружена и настроена модель для {gender} {speaker} из {model_path}")
-            except Exception as e:
-                logger.error(f"Ошибка загрузки модели для {gender} {speaker}: {str(e)}")
-        else:
-            logger.warning(f"Файл модели не найден: {model_path}")
+# Предзагружаем модели в отдельные экземпляры RVC для всех языков
+for language, language_models in LANGUAGE_MODELS.items():
+    for gender, speakers in language_models.items():
+        for speaker, model_path in speakers.items():
+            if os.path.exists(model_path):
+                try:
+                    # Создаем новый экземпляр для каждой модели
+                    rvc_instance = RVCInference(device=device)
+                    rvc_instance.load_model(model_path)
+                    
+                    # Установка оптимальных параметров для данной модели
+                    pitch_adjust = 0 if gender == "male" else 2
+                    rvc_instance.f0up_key = pitch_adjust
+                    rvc_instance.f0method = "rmvpe"  # или другой быстрый метод
+                    rvc_instance.index_rate = float(speaker.split('_')[1])
+                    rvc_instance.protect = 0.33
+                    
+                    rvc_instances[(language, gender, speaker)] = rvc_instance
+                    logger.info(f"Загружена и настроена модель для {language} {gender} {speaker} из {model_path}")
+                except Exception as e:
+                    logger.error(f"Ошибка загрузки модели для {language} {gender} {speaker}: {str(e)}")
+            else:
+                logger.warning(f"Файл модели не найден: {model_path}")
 
 # Устанавливаем резервный экземпляр на случай отсутствия модели
 default_rvc = RVCInference(device=device)
 
-def process_file(input_path, output_path, gender, speaker_index):
+def process_file(input_path, output_path, language, gender, speaker_index):
     """Функция для обработки одного файла в отдельном потоке"""
     try:
         start_time = time.time()
@@ -99,9 +127,9 @@ def process_file(input_path, output_path, gender, speaker_index):
             gc.collect()
         
         # Получаем соответствующий экземпляр RVC
-        rvc_instance = rvc_instances.get((gender, speaker_index), default_rvc)
-        if (gender, speaker_index) not in rvc_instances:
-            logger.warning(f"Используется запасной экземпляр для {gender} {speaker_index}")
+        rvc_instance = rvc_instances.get((language, gender, speaker_index), default_rvc)
+        if (language, gender, speaker_index) not in rvc_instances:
+            logger.warning(f"Используется запасной экземпляр для {language} {gender} {speaker_index}")
             
             # Устанавливаем параметры, если используется запасной экземпляр
             pitch_adjust = 0 if gender == "male" else 2
@@ -174,23 +202,28 @@ def convert_audio_batch():
     # Получение общих параметров для всех файлов
     speaker_index = request.form.get("speaker_index", "SPEAKER_01")
     gender = request.form.get("gender", "male").lower()
+    language = request.form.get("language", "ru").lower()
+    
+    # Проверка языка
+    if language not in LANGUAGE_MODELS:
+        return jsonify({"error": f"Неверный язык: {language}. Доступны: ru, es, hi"}), 400
     
     # Проверка модели
-    if (gender, speaker_index) not in rvc_instances:
+    if (language, gender, speaker_index) not in rvc_instances:
         # Использовать резервную модель, если указанная не найдена
-        logger.warning(f"Модель для {gender} {speaker_index} не найдена, поиск альтернативы")
+        logger.warning(f"Модель для {language} {gender} {speaker_index} не найдена, поиск альтернативы")
         
-        # Попытка найти другую модель для того же пола
+        # Попытка найти другую модель для того же языка и пола
         found = False
-        for (g, s) in rvc_instances.keys():
-            if g == gender:
+        for (lang, g, s) in rvc_instances.keys():
+            if lang == language and g == gender:
                 speaker_index = s
-                logger.info(f"Используется альтернативная модель: {gender} {speaker_index}")
+                logger.info(f"Используется альтернативная модель: {language} {gender} {speaker_index}")
                 found = True
                 break
                 
         if not found:
-            return jsonify({"error": "Неверный пол или индекс спикера"}), 400
+            return jsonify({"error": f"Неверный пол или индекс спикера для языка {language}"}), 400
     
     # Создаем временную директорию для результатов
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -205,7 +238,7 @@ def convert_audio_batch():
             input_files.append(input_path)
             output_files.append(output_path)
         
-        logger.info(f"Начало обработки {len(input_files)} файлов для {gender} {speaker_index}")
+        logger.info(f"Начало обработки {len(input_files)} файлов для {language} {gender} {speaker_index}")
         
         try:
             # Параллельная обработка файлов с использованием ThreadPoolExecutor
@@ -220,7 +253,7 @@ def convert_audio_batch():
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Создаем задачи для обработки файлов
                 future_to_file = {
-                    executor.submit(process_file, input_path, output_path, gender, speaker_index): 
+                    executor.submit(process_file, input_path, output_path, language, gender, speaker_index): 
                     (i, input_path, output_path) 
                     for i, (input_path, output_path) in enumerate(zip(input_files, output_files))
                 }
@@ -264,23 +297,28 @@ def convert_audio():
     # Получение параметров из формы
     speaker_index = request.form.get("speaker_index", "SPEAKER_01")
     gender = request.form.get("gender", "male").lower()
+    language = request.form.get("language", "ru").lower()
 
-    # Проверка, загружена ли модель для указанного пола и спикера
-    if (gender, speaker_index) not in rvc_instances:
+    # Проверка языка
+    if language not in LANGUAGE_MODELS:
+        return jsonify({"error": f"Неверный язык: {language}. Доступны: ru, es, hi"}), 400
+
+    # Проверка, загружена ли модель для указанного языка, пола и спикера
+    if (language, gender, speaker_index) not in rvc_instances:
         # Использовать резервную модель, если указанная не найдена
-        logger.warning(f"Модель для {gender} {speaker_index} не найдена, поиск альтернативы")
+        logger.warning(f"Модель для {language} {gender} {speaker_index} не найдена, поиск альтернативы")
         
-        # Попытка найти другую модель для того же пола
+        # Попытка найти другую модель для того же языка и пола
         found = False
-        for (g, s) in rvc_instances.keys():
-            if g == gender:
+        for (lang, g, s) in rvc_instances.keys():
+            if lang == language and g == gender:
                 speaker_index = s
-                logger.info(f"Используется альтернативная модель: {gender} {speaker_index}")
+                logger.info(f"Используется альтернативная модель: {language} {gender} {speaker_index}")
                 found = True
                 break
                 
         if not found:
-            return jsonify({"error": "Неверный пол или индекс спикера"}), 400
+            return jsonify({"error": f"Неверный пол или индекс спикера для языка {language}"}), 400
 
     # Сохранение входного файла во временный файл
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_in:
@@ -303,13 +341,13 @@ def convert_audio():
             gc.collect()
 
         # Выполнение конвертации с использованием соответствующего экземпляра
-        rvc_instance = rvc_instances.get((gender, speaker_index), default_rvc)
+        rvc_instance = rvc_instances.get((language, gender, speaker_index), default_rvc)
         
         start_time = time.time()
-        logger.info(f"Начало конвертации файла {os.path.basename(input_path)}")
+        logger.info(f"Начало конвертации файла {os.path.basename(input_path)} для {language}")
         
         # Обработка файла
-        process_file(input_path, output_path, gender, speaker_index)
+        process_file(input_path, output_path, language, gender, speaker_index)
         
         elapsed = time.time() - start_time
         logger.info(f"Конвертация завершена за {elapsed:.2f} сек")
@@ -337,10 +375,12 @@ def convert_audio():
 def list_models():
     """Список всех доступных моделей."""
     models = {}
-    for (gender, speaker), instance in rvc_instances.items():
-        if gender not in models:
-            models[gender] = []
-        models[gender].append(speaker)
+    for (language, gender, speaker), instance in rvc_instances.items():
+        if language not in models:
+            models[language] = {}
+        if gender not in models[language]:
+            models[language][gender] = []
+        models[language][gender].append(speaker)
     
     return jsonify(models)
 
@@ -371,7 +411,7 @@ def get_status():
         "cuda_available": torch.cuda.is_available(),
         "cuda_info": cuda_info,
         "loaded_models_count": len(rvc_instances),
-        "loaded_models": [f"{gender}_{speaker}" for gender, speaker in rvc_instances.keys()]
+        "loaded_models": [f"{language}_{gender}_{speaker}" for language, gender, speaker in rvc_instances.keys()]
     })
 
 if __name__ == "__main__":
