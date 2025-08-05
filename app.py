@@ -60,11 +60,13 @@ RU_AVAILABLE_MODELS = {
 
 ES_AVAILABLE_MODELS = {
     "male": {
-        "SPEAKER_01": "rvc_models/es_male_2/model.pth",
-        "SPEAKER_02": "rvc_models/es_male_1/model.pth",
+        "SPEAKER_01": "rvc_models/male_2/model.pth",
+        "SPEAKER_02": "rvc_models/male_1/model.pth",
+        "SPEAKER_03": "rvc_models/male_3/model.pth"
     },
     "female": {
-        "SPEAKER_01": "rvc_models/es_female_1/model.pth",
+        "SPEAKER_01": "rvc_models/female_1/model.pth",
+        "SPEAKER_02": "rvc_models/female_2/model.pth",
     }
 }
 
